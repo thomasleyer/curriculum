@@ -1,9 +1,9 @@
 Tools for productivity
 **********************
 
-The work of operations is often helped by using the combinations of tools.
-The tools you choose to use will depend heavily on your work style. Over time
-you may even change the tools you use.
+The work of operations is often helped by using a combination of tools. The
+tools you choose to use will depend heavily on your environment and work style.
+Over time you may even change the tools you use.
 
 This is a list of commonly used tools, we recommend trying as many of them as
 you have time for. Finding the right tool is often like finding a good pair of
@@ -15,6 +15,16 @@ Terminal emulators
 
 OSX: iTerm2
 -----------
+
+Rather than stick with the default terminal, many sysadmins on OS X install
+iTerm2_. iTerm2's greater flexibility and larger feature set have made it
+a de facto standard among technical Mac users. Like most modern
+terminals, it supports vertical and horizontal splits, tabs, profiles,
+etc. In addition, it stores the rendered buffer for a period of time
+which serves as a way to view previous things that might have been lost
+due to editor crashes or the like.
+
+.. _iTerm2: http://iterm2.com/
 
 
 SSH
@@ -38,6 +48,102 @@ the functionality you would need from an SSH client.
 
 iOS: iSSH
 ---------
+A universal app available on the App Store, iSSH supports most--if not all--of
+the features a demanding power user needs.
+
+SSH Use Cases
+=============
+Far more than just a secure way to access a shell on a remote machine, ssh has
+evolved to support a large collection of ways to encapsulate traffic over the
+encrypted channel. Each of these is useful in different situations. This
+section will present some common problems, and will present how to solve the
+problems with ssh. It is important to note that all port forwarding and
+proxying occurs over the secure ssh channel. Besides working around firewall
+rules, the tunnels also provided a layer of security where there may not
+otherwise be one.
+
+Single port on foreign machine firewalled
+-----------------------------------------
+For this usecase, consider a loadbalancer--``lb-foo-1``--with a Web management
+interface listening on port 9090. This interface is only routable to a LAN
+private to the datacenter--10.10.10.0/24. Its IP address is 10.10.10.20. There
+is a machine on the 10.10.10.0/24 network with ssh access--``jumphost-foo-1``,
+accessible via DNS with the LAN IP 10.10.10.19. Therefore, one way to
+access ``lb-foo-1`` is via bouncing through ``jumphost-foo-1``. OpenSSH
+supplies the ``-L`` option to bind a local port to a port opened on the
+other side of the tunnel. On the remote end, ssh opens a connection to
+the host and port specified to the ``-L`` option. An example for this
+usecase:
+
+``ssh -L 9090:lb-foo-1:9090 jumphost-foo-1``
+
+This will open a connection from ``jumphost-foo-1`` to ``lb-foo-1`` on
+port 9090, and will bind the local port 9090 to a tunnel through the
+connection to that port. All traffic sent to the local port 9090 will
+reach ``lb-foo-1:9090``. It is important to note that the host given to
+``-L`` uses the perspective of the machine ssh connects to directly.
+This is important to remember for environments using hosts files or
+private / split-horizon DNS. In this usecase, an invocation like the
+following would work as well:
+
+``ssh -L 9090:10.10.10.20:9090 jumphost-foo-1``
+
+In this case, ``jumphost-foo-1`` would try to connect to ``10.10.10.20``
+directly, skipping the DNS lookup.
+
+Tunnel all traffic through remote machine
+-----------------------------------------
+For this usecase, consider the rest of the machines in the 10.10.10.0/24
+network. There are many ways to access them, including VPNs of various
+sorts. In addition to creating tunnels to specific ports, OpenSSH can
+also create a SOCKS proxy. OpenSSH provides the ``-D`` option for this.
+As an example, to bounce from ``jumphost-1`` to the rest of the network:
+
+``ssh -D 9999 jumphost-foo-1``
+
+Once the SOCKS proxy is in place, the operating system or applications
+needing access to the proxy need to be configured to use it. This will
+vary per-application. Some operating systems (OS X) provide system-wide
+proxy configuration.
+
+Reverse Tunneling
+------------------
+
+In some situations it may be necessary to forward ports from the remote
+machine to the local one. While not as common as other port forwarding
+techniques, it is often the only option available in the situations
+where it sees use. For this feature, OpenSSH listens to a port on the
+remote machine and sends the traffic to the remote host and port. The
+syntax for the ``-R`` option is the same as for the ``-L`` option
+described above. As an example, to have OpenSSH tunnel the remote port
+9090 to the local port 8000 on host ``workstation``:
+
+``ssh -R 9090:workstation:8000 jumphost-foo-1``
+
+Then, programs on ``jumphost-foo-1``--or that can access its port
+9090--will be able to access the local port 8000 on ``workstation``.
+
+Tunneling stdin and stdout
+--------------------------
+
+This method makes using a jumphost transparent. The idea is to tunnel
+not a single port, but the entire connection over the ssh channel. This
+usage is typically a matter of configuration in the ``ssh_config`` file,
+taking advantage of its wildcard-capable ``Host`` directive::
+
+  Host *.lan
+  ProxyCommand ssh -W %h:22 jumphost-foo-1
+
+This configuration uses the ProxyCommand feature to cooperate with the
+``-W`` flag. Hostnames are resolved from the perspective of the
+jumphost. In this example, the machines use an internal pseudo-top level
+domain of ``.lan``. To reach, e.g., ``www-1.lan``:
+
+``ssh www-1.lan``
+
+Before doing DNS resolution, OpenSSH will look in its ``ssh_config``
+file for Host entries. Therefore, internal DNS on the foreign end is
+sufficient.
 
 
 Multiplexers
@@ -51,7 +157,7 @@ There are however two limitations to working this way:
 
 #. You'll often need to be connected to more than one remote system at a time.
    Opening a whole new terminal each time can result in a lot of windows cluttering
-   up previous screen space.
+   up precious screen space.
 #. When happens if your internet connection stops working? All of your
    connections are reset. Any work you might have been doing on the remote servers
    can be lost.
@@ -84,8 +190,109 @@ GNU Screen
 ``screen`` is one of the longest lived multiplexers. Almost everyone who has
 used a multiplexer has used screen, and you can't go far wrong with it.
 
-.. todo::
-   Explain how to use ``screen``
+``screen`` is a full-screen window manager that multiplexes a physical terminal 
+between several processes (typically interactive shells).  It is useful for 
+creating sessions that can be disconnected from and reconnected to later.  This
+is useful for running tasks that can take a long time that you do not want to 
+have an ssh session timeout on, such as a large database import.  In these cases
+cron is also a very good way to run one off long running tasks.
+
+``screen`` is also **very useful** for creating sessions that users can share.
+
+Installation
+~~~~~~~~~~~~
+Debian and descendants (Ubuntu, Mint, Suse, etc):
+
+.. code-block:: console
+
+  apt-get install screen
+
+On RedHat-style distributions install with the command:
+
+.. code-block:: console
+
+  yum install screen
+
+Basic usage
+~~~~~~~~~~~
+Create a session:
+
+.. code-block:: console
+
+  screen -S session1
+
+To detach from a session - in the session type Ctrl+a+d
+
+List available screen sessions:
+
+.. code-block:: console
+
+  screen -ls
+
+.. code-block:: console
+
+  [gary@mc9 ~]# screen -ls
+  There are screens on:
+          21707.session2  (Detached)
+          21692.session1  (Detached)
+          21936.session3  (Attached)
+  3 Sockets in /var/run/screen/S-gary.
+  [gary@mc9 ~]#
+
+Here we can see 3 screen sessions are running, 2 detached and 1 attached.
+
+Reattach to a session:
+
+.. code-block:: console
+
+  screen -r session1
+
+Share a session:
+
+User alice starts session:
+
+.. code-block:: console
+
+  screen -S session1
+
+User bob can then attach to the same session (both alice and bob can send commands to the session):
+
+.. code-block:: console
+
+  sudo screen -x alice/session1
+
+Non root users, must use sudo to attach to another user's session.
+
+Create a session with a log:
+
+.. code-block:: console
+
+  screen -L -S session1
+
+``screen`` will output the session log to the user's home directory with the 
+file ``~/screenlog.0`` (0 being the session id).  PuTTY is also as a very useful 
+and featureful ssh client that can be used for logging ssh sessions locally 
+(Windows and Linux).  ``screen`` can be used within a PuTTY session.
+
+Create a session with a log and 20000 lines of scrollback in the terminal:
+
+.. code-block:: console
+
+  screen -h 20000 -L -S session1
+
+
+Configuration
+~~~~~~~~~~~~~
+``screen`` has a fairly extensive set of configuration options, when screen is invoked, it executes initialization commands from the files ``/etc/screenrc`` and ``.screenrc`` in the user's home directory.
+
+Further info
+~~~~~~~~~~~~
+
+.. code-block:: console
+
+  man screen
+
+There is a nifty cheat sheet for the most important ``screen`` and ``tmux`` keybindings (see below in tmux references [3]_).
 
 .. _tmux:
 
@@ -105,20 +312,20 @@ Installation
 tmux is available on Debian and its descendants like Ubuntu or Mint
 with the command:
 
-.. code-block:: bash
+.. code-block:: console
 
-  aptitude install tmux
+  apt-get install tmux
 
-On RedHat-style distributions you will have to use the :term:`EPEL` repo to
+On RedHat-style distributions you will have to use the :term:`EPEL` repository to
 get a pre-built package, and install with the command:
 
-.. code-block:: bash
+.. code-block:: console
 
   yum install tmux
 
 On MacOS you can use Homebrew to install via:
 
-.. code-block:: bash
+.. code-block:: console
 
   brew install tmux
 
@@ -139,13 +346,13 @@ If you want to detach from the session you have to hit ``ctrl-b`` and
 you started onside the ``tmux`` session continue to run, you can see
 this with a simple
 
-.. code-block:: bash
+.. code-block:: console
 
   ps -ef | grep tmux
 
 You should see something like the following:
 
-.. code-block:: bash
+.. code-block:: console
 
   cdrexler 13751     1  0 Nov30 ?        00:00:41 tmux
 
@@ -157,14 +364,14 @@ if your connectivity is flaky or you have to work from different
 locations. If you check the process table for the process id of the
 tmux process
 
-.. code-block:: bash
+.. code-block:: console
 
   ps -ef | grep 13751
 
 you will find that is the parent process of the two shells you created
 in the beginning of the chapter:
 
-.. code-block:: bash
+.. code-block:: console
 
    cdrexler  4525 13751  0 17:54 pts/2    00:00:00 -zsh
    cdrexler  4533 13751  0 17:54 pts/5    00:00:00 -zsh
@@ -172,27 +379,27 @@ in the beginning of the chapter:
 If you want to get an overview of the running tmux processes on your
 system you can use the command
 
-.. code-block:: bash
+.. code-block:: console
 
   tmux ls
 
 It will list all available ``tmux`` sessions on your system [#]_. If there
 is only one you can attach to it with the command:
 
-.. code-block:: bash
+.. code-block:: console
 
   tmux att
 
 If there is more than one session the output of ``tmux ls`` will look like this:
 
-.. code-block:: bash
+.. code-block:: console
 
    0: 3 windows (created Fri Nov 30 18:32:37 2012) [80x38]
    4: 1 windows (created Sun Dec  2 17:44:15 2012) [150x39] (attached)
 
 You will then have to select the right session with the ``-t`` command line switch:
 
-.. code-block:: bash
+.. code-block:: console
 
   tmux att -t 4
 
@@ -237,7 +444,7 @@ useful settings.
 Please note that you can force ``tmux`` to use another configfile with
 the ``-f`` command line switch like so:
 
-.. code-block:: bash
+.. code-block:: console
 
   tmux -f mytmuxconf.conf
 
@@ -248,10 +455,19 @@ There is a nifty cheat sheet [#]_ for the most important
 
 byobu
 -----
-.. todo::
+Byobu_ is a wrapper around one of screen or tmux. It
+provides profile support, F-keybindings, configuration utilities and a
+system status notification bar for most Linux, BSD or Mac operating systems.
 
-   - describe advantages of meta-multiplexers like ``byobu`` [#]_ that can use different backends.
-   - describe scrollback and copy and paste
+Byobu is available in major distros as a packaged binary. Launching byobu will 
+run whichever the package maintainer included as a dependency, if you have both 
+installed, you can select explicitly with byobu-{screen,tmux}.  Basic 
+configuration is launched with F9 or byobu-config.
+
+Scrollback starts with F7, mark the start of your buffer by hitting the
+spacebar, then use the spacebar again to mark the end of your selection (which
+will be copied into byobu's clipboard automatically). Press Byobu-Escape
+(typically Ctrl-A) + [ to paste.
 
 References
 ----------
@@ -260,7 +476,7 @@ References
 .. [#] http://www.dayid.org/os/notes/tm.html
 .. [#] http://pragprog.com/book/bhtmux/tmux
 .. [#] https://launchpad.net/byobu
-
+.. [Byobu] http://byobu.co/
 
 Shell customisations
 ====================
@@ -331,3 +547,4 @@ EverNote
 
 OneNote
 -------
+
